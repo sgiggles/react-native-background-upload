@@ -1,6 +1,6 @@
 {
-  "name": "react-native-background-upload",
-  "version": "5.1.0",
+  "name": "@sgiggles/react-native-background-upload",
+  "version": "1.0.0",
   "description": "Cross platform http post file uploader with android and iOS background support",
   "main": "index.js",
   "scripts": {
@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Vydia/react-native-background-upload.git"
+    "url": "https://github.com/sgiggles/react-native-background-upload.git"
   },
   "keywords": [
     "NSURLSession",
@@ -24,7 +24,7 @@
   "author": "Steve Potter",
   "license": "BSD-3-Clause",
   "bugs": {
-    "url": "https://github.com/Vydia/react-native-background-upload/issues"
+    "url": "https://github.com/sgiggles/react-native-background-upload/issues"
   },
-  "homepage": "https://github.com/Vydia/react-native-background-upload#readme"
+  "homepage": "https://github.com/sgiggles/react-native-background-upload#readme"
 }

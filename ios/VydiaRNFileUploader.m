@@ -55,31 +55,37 @@ NSURLSession *_urlSession = nil;
 RCT_EXPORT_METHOD(getFileInfo:(NSString *)path resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject)
 {
     @try {
-        NSURL *fileUri = [NSURL URLWithString: path];
-        NSString *pathWithoutProtocol = [fileUri path];
-        NSString *name = [fileUri lastPathComponent];
-        NSString *extension = [name pathExtension];
-        bool exists = [[NSFileManager defaultManager] fileExistsAtPath:pathWithoutProtocol];
-        NSMutableDictionary *params = [NSMutableDictionary dictionaryWithObjectsAndKeys: name, @"name", nil];
-        [params setObject:extension forKey:@"extension"];
-        [params setObject:[NSNumber numberWithBool:exists] forKey:@"exists"];
-
-        if (exists)
-        {
-            [params setObject:[self guessMIMETypeFromFileName:name] forKey:@"mimeType"];
-            NSError* error;
-            NSDictionary<NSFileAttributeKey, id> *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:pathWithoutProtocol error:&error];
-            if (error == nil)
-            {
-                unsigned long long fileSize = [attributes fileSize];
-                [params setObject:[NSNumber numberWithLong:fileSize] forKey:@"size"];
-            }
-        }
+        NSMutableDictionary *params = [self getFileInfoDictionary:path];
         resolve(params);
     }
     @catch (NSException *exception) {
         reject(@"RN Uploader", exception.name, nil);
     }
+}
+
+- (NSMutableDictionary *) getFileInfoDictionary:(NSString *)path
+{
+    NSURL *fileUri = [NSURL URLWithString: path];
+    NSString *pathWithoutProtocol = [fileUri path];
+    NSString *name = [fileUri lastPathComponent];
+    NSString *extension = [name pathExtension];
+    bool exists = [[NSFileManager defaultManager] fileExistsAtPath:pathWithoutProtocol];
+    NSMutableDictionary *params = [NSMutableDictionary dictionaryWithObjectsAndKeys: name, @"name", nil];
+    [params setObject:extension forKey:@"extension"];
+    [params setObject:[NSNumber numberWithBool:exists] forKey:@"exists"];
+
+    if (exists)
+    {
+        [params setObject:[self guessMIMETypeFromFileName:name] forKey:@"mimeType"];
+        NSError* error;
+        NSDictionary<NSFileAttributeKey, id> *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:pathWithoutProtocol error:&error];
+        if (error == nil)
+        {
+            unsigned long long fileSize = [attributes fileSize];
+            [params setObject:[NSNumber numberWithLong:fileSize] forKey:@"size"];
+        }
+    }
+    return params;
 }
 
 /*
@@ -147,11 +153,11 @@ RCT_EXPORT_METHOD(startUpload:(NSDictionary *)options resolve:(RCTPromiseResolve
     NSString *uploadUrl = options[@"url"];
     __block NSString *fileURI = options[@"path"];
     NSString *method = options[@"method"] ?: @"POST";
-    NSString *uploadType = options[@"type"] ?: @"raw";
-    NSString *fieldName = options[@"field"];
-    NSString *customUploadId = options[@"customUploadId"];
+    // NSString *uploadType = options[@"type"] ?: @"raw";
+    // NSString *fieldName = options[@"field"];
+    NSString *uploadId = options[@"uploadId"];
     NSDictionary *headers = options[@"headers"];
-    NSDictionary *parameters = options[@"parameters"];
+    // NSDictionary *parameters = options[@"parameters"];
 
     @try {
         NSURL *requestUrl = [NSURL URLWithString: uploadUrl];
@@ -189,27 +195,53 @@ RCT_EXPORT_METHOD(startUpload:(NSDictionary *)options resolve:(RCTPromiseResolve
         }
 
         NSURLSessionDataTask *uploadTask;
+        NSString *internalUploadId = [NSString stringWithFormat:@"%i", thisUploadId];
+        if (uploadId != nil) {
+            NSMutableDictionary *fileInfo = [self getFileInfoDictionary:fileURI];
+            NSNumber *size = fileInfo[@"size"];
+            int iter = 1;
+            NSString *urlWithParams = [self getUrlWithParams:uploadUrl uploadId:uploadId partNumber:[@(iter) stringValue]];
+            NSURL *partUrl = [NSURL URLWithString: urlWithParams];
 
-        if ([uploadType isEqualToString:@"multipart"]) {
-            NSString *uuidStr = [[NSUUID UUID] UUIDString];
-            [request setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", uuidStr] forHTTPHeaderField:@"Content-Type"];
+            uint64_t chunkSize = (uint64_t)6*1024*1024;
+            uint64_t offset = 0;
+            while(offset < [size longValue]) {
+                [request setURL:partUrl];
+                NSData *chunk = [self createBodyChunk:fileURI offset:offset length:chunkSize];
+                uploadTask = [[self urlSession] uploadTaskWithRequest:request fromData:chunk];
+                uploadTask.taskDescription = internalUploadId;
 
-            NSData *httpBody = [self createBodyWithBoundary:uuidStr path:fileURI parameters: parameters fieldName:fieldName];
-            [request setHTTPBody: httpBody];
-
-            uploadTask = [[self urlSession] uploadTaskWithStreamedRequest:request];
-        } else {
-            if (parameters.count > 0) {
-                reject(@"RN Uploader", @"Parameters supported only in multipart type", nil);
-                return;
+                [uploadTask resume];
+                offset = offset + chunkSize;
+                iter++;
+                urlWithParams = [self getUrlWithParams:uploadUrl uploadId:uploadId partNumber:[@(iter) stringValue]];
+                partUrl = [NSURL URLWithString: urlWithParams];
             }
-
+        } else {
             uploadTask = [[self urlSession] uploadTaskWithRequest:request fromFile:[NSURL URLWithString: fileURI]];
+            uploadTask.taskDescription = internalUploadId;
+            [uploadTask resume];
         }
 
-        uploadTask.taskDescription = customUploadId ? customUploadId : [NSString stringWithFormat:@"%i", thisUploadId];
+        // NSURLSessionDataTask *uploadTask;
 
-        [uploadTask resume];
+        // if ([uploadType isEqualToString:@"multipart"]) {
+        //     NSString *uuidStr = [[NSUUID UUID] UUIDString];
+        //     [request setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", uuidStr] forHTTPHeaderField:@"Content-Type"];
+
+        //     NSData *httpBody = [self createBodyWithBoundary:uuidStr path:fileURI parameters: parameters fieldName:fieldName];
+        //     [request setHTTPBody: httpBody];
+
+        //     uploadTask = [[self urlSession] uploadTaskWithStreamedRequest:request];
+        // } else {
+        //     if (parameters.count > 0) {
+        //         reject(@"RN Uploader", @"Parameters supported only in multipart type", nil);
+        //         return;
+        //     }
+
+        //     uploadTask = [[self urlSession] uploadTaskWithRequest:request fromFile:[NSURL URLWithString: fileURI]];
+        // }
+
         resolve(uploadTask.taskDescription);
     }
     @catch (NSException *exception) {
@@ -234,34 +266,43 @@ RCT_EXPORT_METHOD(cancelUpload: (NSString *)cancelUploadId resolve:(RCTPromiseRe
     resolve([NSNumber numberWithBool:YES]);
 }
 
-- (NSData *)createBodyWithBoundary:(NSString *)boundary
-                         path:(NSString *)path
-                         parameters:(NSDictionary *)parameters
-                         fieldName:(NSString *)fieldName {
+- (NSString *)getUrlWithParams:(NSString *)url
+                        uploadId:(NSString *)uploadId
+                        partNumber:(NSString *)partNumber {
+    return [[[[url stringByAppendingString:@"?uploadId="] stringByAppendingString: uploadId] stringByAppendingString:@"&partNumber="] stringByAppendingString: partNumber];
+}
+
+- (NSData *)createBodyChunk:(NSString *)path
+                         offset:(uint64_t)offset
+                         length:(uint64_t)length {
 
     NSMutableData *httpBody = [NSMutableData data];
 
     // resolve path
     NSURL *fileUri = [NSURL URLWithString: path];
     NSString *pathWithoutProtocol = [fileUri path];
+    NSFileHandle *file = [NSFileHandle fileHandleForReadingAtPath:pathWithoutProtocol];
 
-    NSData *data = [[NSFileManager defaultManager] contentsAtPath:pathWithoutProtocol];
-    NSString *filename  = [path lastPathComponent];
-    NSString *mimetype  = [self guessMIMETypeFromFileName:path];
+    [file seekToFileOffset: offset];
+    NSData *dataBuffer = [file readDataOfLength: length];
+//    NSString *filename = [path lastPathComponent];
+//    NSString *mimetype = [self guessMIMETypeFromFileName:path];
 
-    [parameters enumerateKeysAndObjectsUsingBlock:^(NSString *parameterKey, NSString *parameterValue, BOOL *stop) {
-        [httpBody appendData:[[NSString stringWithFormat:@"--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-        [httpBody appendData:[[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"%@\"\r\n\r\n", parameterKey] dataUsingEncoding:NSUTF8StringEncoding]];
-        [httpBody appendData:[[NSString stringWithFormat:@"%@\r\n", parameterValue] dataUsingEncoding:NSUTF8StringEncoding]];
-    }];
+    [httpBody appendData:dataBuffer];
 
-    [httpBody appendData:[[NSString stringWithFormat:@"--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-    [httpBody appendData:[[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"%@\"; filename=\"%@\"\r\n", fieldName, filename] dataUsingEncoding:NSUTF8StringEncoding]];
-    [httpBody appendData:[[NSString stringWithFormat:@"Content-Type: %@\r\n\r\n", mimetype] dataUsingEncoding:NSUTF8StringEncoding]];
-    [httpBody appendData:data];
-    [httpBody appendData:[@"\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+    // [parameters enumerateKeysAndObjectsUsingBlock:^(NSString *parameterKey, NSString *parameterValue, BOOL *stop) {
+    //     [httpBody appendData:[[NSString stringWithFormat:@"--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+    //     [httpBody appendData:[[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"%@\"\r\n\r\n", parameterKey] dataUsingEncoding:NSUTF8StringEncoding]];
+    //     [httpBody appendData:[[NSString stringWithFormat:@"%@\r\n", parameterValue] dataUsingEncoding:NSUTF8StringEncoding]];
+    // }];
 
-    [httpBody appendData:[[NSString stringWithFormat:@"--%@--\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+    // [httpBody appendData:[[NSString stringWithFormat:@"--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+    // [httpBody appendData:[[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"%@\"; filename=\"%@\"\r\n", fieldName, filename] dataUsingEncoding:NSUTF8StringEncoding]];
+    // [httpBody appendData:[[NSString stringWithFormat:@"Content-Type: %@\r\n\r\n", mimetype] dataUsingEncoding:NSUTF8StringEncoding]];
+    // [httpBody appendData:data];
+    // [httpBody appendData:[@"\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+
+    // [httpBody appendData:[[NSString stringWithFormat:@"--%@--\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
 
     return httpBody;
 }
