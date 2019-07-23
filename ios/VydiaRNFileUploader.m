@@ -163,11 +163,11 @@ RCT_EXPORT_METHOD(startUpload:(NSDictionary *)options resolve:(RCTPromiseResolve
     NSString *uploadUrl = options[@"url"];
     __block NSString *fileURI = options[@"path"];
     NSString *method = options[@"method"] ?: @"POST";
-    NSString *uploadType = options[@"type"] ?: @"raw";
-    NSString *fieldName = options[@"field"];
+    // NSString *uploadType = options[@"type"] ?: @"raw";
+    // NSString *fieldName = options[@"field"];
     NSString *customUploadId = options[@"customUploadId"];
     NSDictionary *headers = options[@"headers"];
-    NSDictionary *parameters = options[@"parameters"];
+    // NSDictionary *parameters = options[@"parameters"];
 
     @try {
         NSURL *requestUrl = [NSURL URLWithString: uploadUrl];
@@ -203,22 +203,25 @@ RCT_EXPORT_METHOD(startUpload:(NSDictionary *)options resolve:(RCTPromiseResolve
 
         NSURLSessionUploadTask *uploadTask;
 
-        if ([uploadType isEqualToString:@"multipart"]) {
-            NSString *uuidStr = [[NSUUID UUID] UUIDString];
-            [request setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", uuidStr] forHTTPHeaderField:@"Content-Type"];
-
-            NSData *httpBody = [self createBodyWithBoundary:uuidStr path:fileURI parameters: parameters fieldName:fieldName];
-            [request setHTTPBody: httpBody];
-
-            uploadTask = [[self urlSession] uploadTaskWithStreamedRequest:request];
-        } else {
-            if (parameters.count > 0) {
-                reject(@"RN Uploader", @"Parameters supported only in multipart type", nil);
-                return;
-            }
-
-            uploadTask = [[self urlSession] uploadTaskWithRequest:request fromFile:[NSURL URLWithString:fileURI]];
-        }
+//        TODO: implement multipart
+//        if ([uploadType isEqualToString:@"multipart"]) {
+//            NSString *uuidStr = [[NSUUID UUID] UUIDString];
+//            [request setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", uuidStr] forHTTPHeaderField:@"Content-Type"];
+//
+//            NSData *httpBody = [self createBodyWithBoundary:uuidStr path:fileURI parameters: parameters fieldName:fieldName];
+//            [request setHTTPBody: httpBody];
+//
+//            uploadTask = [[self urlSession] uploadTaskWithStreamedRequest:request];
+//        } else {
+//            if (parameters.count > 0) {
+//                reject(@"RN Uploader", @"Parameters supported only in multipart type", nil);
+//                return;
+//            }
+//
+//            uploadTask = [[self urlSession] uploadTaskWithRequest:request fromFile:[NSURL URLWithString:fileURI]];
+//        }
+        
+        uploadTask = [[self urlSession] uploadTaskWithRequest:request fromFile:[NSURL URLWithString:fileURI]];
 
         uploadTask.taskDescription = customUploadId ? customUploadId : [NSString stringWithFormat:@"%i", thisUploadId];
 
