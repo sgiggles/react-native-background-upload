@@ -9,6 +9,7 @@ ios/*.ipa
 ios/*.dSYM.zip
 ios/Pods/
 js/settings/settings-user.*
+*.code-workspace
 
 # OSX
 #
