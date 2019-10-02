@@ -28,6 +28,9 @@ NSMutableDictionary *_tmpURIs = nil;
 
 -(id) init {
   self = [super init];
+  [[NSNotificationCenter defaultCenter] addObserver:self
+  selector:@selector(resumeTasks)
+      name:UIApplicationDidBecomeActiveNotification object:nil];
   if (self) {
     staticEventEmitter = self;
     _responsesData = [NSMutableDictionary dictionary];
@@ -48,9 +51,24 @@ NSMutableDictionary *_tmpURIs = nil;
         @"RNFileUploader-progress",
         @"RNFileUploader-error",
         @"RNFileUploader-cancelled",
-        @"RNFileUploader-completed"
+        @"RNFileUploader-completed",
+        @"RNFileUploader-info"
     ];
 }
+
+// work around to get delegates firing again after app becomes active again
+- (void)resumeTasks {
+    #if DEBUG
+        NSLog(@"%@", @"Resuming upload tasks");
+    #endif
+    NSURLSession* session = [self urlSession];
+    [session getTasksWithCompletionHandler:^(NSArray<NSURLSessionDataTask *> * _Nonnull dataTasks, NSArray<NSURLSessionUploadTask *> * _Nonnull uploadTasks, NSArray<NSURLSessionDownloadTask *> * _Nonnull downloadTasks) {
+        for (id task in uploadTasks) {
+            [task resume];
+        }
+    }];
+};
+
 
 /*
  Gets file information for the path specified.  Example valid path is: file:///var/mobile/Containers/Data/Application/3C8A0EFB-A316-45C0-A30A-761BF8CCF2F8/tmp/trim.A5F76017-14E9-4890-907E-36A045AF9436.MOV
@@ -202,24 +220,6 @@ RCT_EXPORT_METHOD(startUpload:(NSDictionary *)options resolve:(RCTPromiseResolve
         dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
 
         NSURLSessionUploadTask *uploadTask;
-
-//        TODO: implement multipart
-//        if ([uploadType isEqualToString:@"multipart"]) {
-//            NSString *uuidStr = [[NSUUID UUID] UUIDString];
-//            [request setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", uuidStr] forHTTPHeaderField:@"Content-Type"];
-//
-//            NSData *httpBody = [self createBodyWithBoundary:uuidStr path:fileURI parameters: parameters fieldName:fieldName];
-//            [request setHTTPBody: httpBody];
-//
-//            uploadTask = [[self urlSession] uploadTaskWithStreamedRequest:request];
-//        } else {
-//            if (parameters.count > 0) {
-//                reject(@"RN Uploader", @"Parameters supported only in multipart type", nil);
-//                return;
-//            }
-//
-//            uploadTask = [[self urlSession] uploadTaskWithRequest:request fromFile:[NSURL URLWithString:fileURI]];
-//        }
         
         uploadTask = [[self urlSession] uploadTaskWithRequest:request fromFile:[NSURL URLWithString:fileURI]];
 
@@ -248,34 +248,6 @@ RCT_EXPORT_METHOD(cancelUpload: (NSString *)cancelUploadId resolve:(RCTPromiseRe
         }
     }];
     resolve([NSNumber numberWithBool:YES]);
-}
-
-- (NSData *)createBodyWithBoundary:(NSString *)boundary
-                         path:(NSString *)path
-                         parameters:(NSDictionary *)parameters
-                         fieldName:(NSString *)fieldName {
-
-    NSMutableData *httpBody = [NSMutableData data];
-
-    NSData *data = [[NSFileManager defaultManager] contentsAtPath:[self filePath:path]];
-    NSString *filename  = [path lastPathComponent];
-    NSString *mimetype  = [self guessMIMETypeFromFileName:path];
-
-    [parameters enumerateKeysAndObjectsUsingBlock:^(NSString *parameterKey, NSString *parameterValue, BOOL *stop) {
-        [httpBody appendData:[[NSString stringWithFormat:@"--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-        [httpBody appendData:[[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"%@\"\r\n\r\n", parameterKey] dataUsingEncoding:NSUTF8StringEncoding]];
-        [httpBody appendData:[[NSString stringWithFormat:@"%@\r\n", parameterValue] dataUsingEncoding:NSUTF8StringEncoding]];
-    }];
-
-    [httpBody appendData:[[NSString stringWithFormat:@"--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-    [httpBody appendData:[[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"%@\"; filename=\"%@\"\r\n", fieldName, filename] dataUsingEncoding:NSUTF8StringEncoding]];
-    [httpBody appendData:[[NSString stringWithFormat:@"Content-Type: %@\r\n\r\n", mimetype] dataUsingEncoding:NSUTF8StringEncoding]];
-    [httpBody appendData:data];
-    [httpBody appendData:[@"\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
-
-    [httpBody appendData:[[NSString stringWithFormat:@"--%@--\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-
-    return httpBody;
 }
 
 - (NSURLSession *)urlSession {
@@ -348,6 +320,9 @@ didCompleteWithError:(NSError *)error {
         [[NSFileManager defaultManager] removeItemAtPath:[self filePath:tmpURI] error:nil];
         [_tmpURIs removeObjectForKey:requestUrl];
     }
+    #if DEBUG
+        NSLog(@"%@", data);
+    #endif
 }
 
 - (void)URLSession:(NSURLSession *)session
@@ -361,6 +336,9 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend {
         progress = 100.0 * (float)totalBytesSent / (float)totalBytesExpectedToSend;
     }
     [self _sendEventWithName:@"RNFileUploader-progress" body:@{ @"id": task.taskDescription, @"progress": [NSNumber numberWithFloat:progress] }];
+    #if DEBUG
+        NSLog(@"%f", progress);
+    #endif
 }
 
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveData:(NSData *)data {
@@ -377,15 +355,35 @@ totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend {
     }
 }
 
-// TODO: do I need this for uploadTaskWithStreamedRequest... will I even need streamed requests?
+- (void)URLSession:(NSURLSession *)session didBecomeInvalidWithError:(NSError *)error {
+    NSMutableDictionary *data = [NSMutableDictionary dictionaryWithObjectsAndKeys:error.localizedDescription, @"error", nil];
+    [data setObject:@"didBecomeInvalidWithError" forKey:@"info"];
+    [self _sendEventWithName:@"RNFileUploader-info" body:data];
+    #if DEBUG
+        NSLog(@"%@", data);
+    #endif
+}
+
+- (void)URLSessionDidFinishEventsForBackgroundURLSession:(NSURLSession *)session {
+    NSMutableDictionary *data = [NSMutableDictionary dictionaryWithObjectsAndKeys:@"URLSessionDidFinishEventsForBackgroundURLSession", @"info", nil];
+    [self _sendEventWithName:@"RNFileUploader-info" body:data];
+    #if DEBUG
+        NSLog(@"%@", data);
+    #endif
+}
+
 - (void)URLSession:(NSURLSession *)session
               task:(NSURLSessionTask *)task
- needNewBodyStream:(void (^)(NSInputStream *bodyStream))completionHandler {
-    NSURLRequest *request = [task originalRequest];
-    NSString *requestUrl = [[request URL] absoluteString];
-    NSString *fileUri = [_fileURIs valueForKey:requestUrl];
-    NSInputStream *inputStream = [NSInputStream inputStreamWithURL:[NSURL URLWithString: fileUri]];
-    completionHandler(inputStream);
-};
+willBeginDelayedRequest:(NSURLRequest *)request
+ completionHandler:(void (^)(NSURLSessionDelayedRequestDisposition disposition, NSURLRequest *newRequest))completionHandler  API_AVAILABLE(ios(11.0)) {
+     NSMutableDictionary *data = [NSMutableDictionary dictionaryWithObjectsAndKeys:task.taskDescription, @"id", nil];
+     [data setObject:@"willBeginDelayedRequest" forKey:@"info"];
+     [data setObject:completionHandler forKey:@"completionHandler"];
+     [self _sendEventWithName:@"RNFileUploader-info" body:data];
+     completionHandler(NSURLSessionDelayedRequestContinueLoading, nil);
+     #if DEBUG
+        NSLog(@"%@", data);
+     #endif
+ }
 
 @end

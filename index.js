@@ -4,7 +4,7 @@
  */
 import { NativeModules, DeviceEventEmitter } from 'react-native'
 
-export type UploadEvent = 'progress' | 'error' | 'completed' | 'cancelled'
+export type UploadEvent = 'progress' | 'error' | 'completed' | 'cancelled' | 'info'
 
 export type NotificationArgs = {
   enabled: boolean
@@ -34,6 +34,7 @@ if (NativeModules.VydiaRNFileUploader) {
   NativeModule.addListener(eventPrefix + 'error')
   NativeModule.addListener(eventPrefix + 'cancelled')
   NativeModule.addListener(eventPrefix + 'completed')
+  NativeModule.addListener(eventPrefix + 'info')
 }
 
 /*
