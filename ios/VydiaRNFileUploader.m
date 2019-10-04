@@ -19,7 +19,6 @@ static int uploadId = 0;
 static RCTEventEmitter* staticEventEmitter = nil;
 static NSString *BACKGROUND_SESSION_ID = @"ReactNativeBackgroundUpload";
 NSURLSession *_urlSession = nil;
-NSMutableDictionary *_fileURIs = nil;
 NSMutableDictionary *_tmpURIs = nil;
 
 + (BOOL)requiresMainQueueSetup {
@@ -34,7 +33,6 @@ NSMutableDictionary *_tmpURIs = nil;
   if (self) {
     staticEventEmitter = self;
     _responsesData = [NSMutableDictionary dictionary];
-    _fileURIs = [NSMutableDictionary dictionary];
     _tmpURIs = [NSMutableDictionary dictionary];
   }
   return self;
@@ -283,9 +281,11 @@ didCompleteWithError:(NSError *)error {
     NSMutableDictionary *data = [NSMutableDictionary dictionaryWithObjectsAndKeys:task.taskDescription, @"id", nil];
     NSURLSessionDataTask *uploadTask = (NSURLSessionDataTask *)task;
     NSHTTPURLResponse *response = (NSHTTPURLResponse *)uploadTask.response;
+    NSNumber *statusCode;
     if (response != nil)
     {
-        [data setObject:[NSNumber numberWithInteger:response.statusCode] forKey:@"responseCode"];
+        statusCode = [NSNumber numberWithInteger:response.statusCode];
+        [data setObject:statusCode forKey:@"responseCode"];
     }
     //Add data that was collected earlier by the didReceiveData method
     NSMutableData *responseData = _responsesData[@(task.taskIdentifier)];
@@ -301,6 +301,10 @@ didCompleteWithError:(NSError *)error {
     {
         [self _sendEventWithName:@"RNFileUploader-completed" body:data];
     }
+    else if (response != nil && [statusCode isEqualToNumber:[NSNumber numberWithInt:200]])
+    {
+        [self _sendEventWithName:@"RNFileUploader-completed" body:data];
+    }
     else
     {
         [data setObject:error.localizedDescription forKey:@"error"];
@@ -313,7 +317,6 @@ didCompleteWithError:(NSError *)error {
     // clean up
     NSURLRequest *request = [task originalRequest];
     NSString *requestUrl = [[request URL] absoluteString];
-    [_fileURIs removeObjectForKey:requestUrl];
     
     NSString *tmpURI = [_tmpURIs valueForKey:requestUrl];
     if (tmpURI) {
